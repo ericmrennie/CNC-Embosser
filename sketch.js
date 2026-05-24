@@ -3,9 +3,11 @@
 // to do : integrate stamp presets that user can drag around
 
 // question : do we need more constraints? 
-
-let symmetry =4; // symmetry variable, defaults to 4, slider can be changed by user
-let angle = 360/symmetry;
+let gui;
+var symmetry = 4;
+var angle = 360/symmetry
+//let symmetry =4; // symmetry variable, defaults to 4, slider can be changed by user
+//let angle = 360/symmetry;
 
 
 // SERIAL CONNECTION VARIABLES:
@@ -59,17 +61,22 @@ function gotData() {
 
 
 function setup() {
-  createCanvas(700, 500);
+  createCanvas(windowWidth, windowHeight);
   angleMode(DEGREES);
-  background(255);
+  background(230);
+
+  // create the GUI
+  gui = createGui('CNC Embosser');
+
+  sliderRange(1, 8, 1);
+  gui.addGlobals('symmetry');
+  // slider = createSlider(2, 6, 2);
+  // slider.position(10, 10);
+  // slider.size(80);
   
-  slider = createSlider(2, 6, 2);
-  slider.position(10, 10);
-  slider.size(80);
-  
-  slider2 = createSlider(1,4,1);
-  slider2.position(10, 50);
-  slider2.size(80);
+  // slider2 = createSlider(1,4,1);
+  // slider2.position(10, 50);
+  // slider2.size(80);
   
   
     // INIT SERIAL CONNECTION:
@@ -101,9 +108,9 @@ function setup() {
 
 
 function draw() {
-  let g = slider.value();
-  let symmetry = g;
-  let angle = 360 / symmetry;
+  let g = symmetry;
+  let mirror = g;
+  let angle = 360 / mirror;
   translate(width / 2, height / 2);
     // If the cursor is within the limits of the canvas...
   if (mouseX > 0 && mouseX < width && mouseY > 0 && mouseY < height) {
@@ -119,7 +126,7 @@ function draw() {
       // For every reflective section the canvas is split into, draw the cursor's
       // coordinates while pressed...
       
-      for (let i = 0; i < symmetry; i++) {
+      for (let i = 0; i < mirror; i++) {
         rotate(angle);
         stroke(0);
         strokeWeight(7);
