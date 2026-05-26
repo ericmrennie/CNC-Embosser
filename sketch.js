@@ -7,7 +7,8 @@ let gui;
 var symmetry = 4;
 //let symmetry =4; // symmetry variable, defaults to 4, slider can be changed by user
 //let angle = 360/symmetry;
-
+const strokes = []; // freehand lines - each is grouped as an array of segments per mousePressed/mouseReleased
+const actions = []; // records events in order
 
 // SERIAL CONNECTION VARIABLES:
 let serial;
@@ -203,8 +204,6 @@ function gotData() {
   console.log(currentString);
 }
 
-
-
 function setup() {
   createCanvas(windowWidth, windowHeight);
   angleMode(DEGREES);
@@ -223,6 +222,8 @@ function setup() {
   // slider = createSlider(2, 6, 2);
   // slider.position(10, 10);
   // slider.size(80);
+  gui.addButton('Undo', undo);
+  gui.addButton('Erase', eraseCanvas);
   
   // slider2 = createSlider(1,4,1);
   // slider2.position(10, 50);
@@ -255,7 +256,6 @@ function setup() {
   buttonGoTo.mousePressed(() =>
     callGoTo(parseFloat(inputX.value()), parseFloat(inputY.value()))
   );
-  
 }
 
 function draw() {
@@ -292,6 +292,7 @@ function draw() {
     if (mouseIsPressed === true && activeStampType === null) {
       // For every reflective section the canvas is split into, draw the cursor's
       // coordinates while pressed...
+      if(strokes.length > 0) strokes[strokes.length - 1].segments.push({ lineStartX, lineStartY, lineEndX, lineEndY });
 
       // CHANGED: draw into freehandBuffer instead of directly onto the canvas,
       // so stamps can sit on top without erasing the lines each frame.
@@ -337,6 +338,11 @@ function mousePressed() {
   // Place a new stamp at the click position
   if (activeStampType !== null) {
     placedStamps.push({ type: activeStampType, x: mx, y: my });
+    actions.push({ type: 'stamp', index: placedStamps.length - 1});
+  } else {
+    // push a new empty stroke entry onto strokes and actions, marking the beginning of a new gesture
+    strokes.push({ segments: [], symmetry: symmetry });
+    actions.push({ type: 'stroke', index: strokes.length - 1});
   }
 }
  
@@ -380,3 +386,53 @@ function isOverElement(el, px, py) {
   return px >= r.left && px <= r.right && py >= r.top && py <= r.bottom;
 }
 // ─────────────────────────────────────────────────────────────────────────────
+
+function undo() {
+  if (actions.length === 0) return;
+  let popped = actions.pop();
+
+  if (popped.type === 'stamp') {
+    placedStamps.splice(popped.index, 1);
+
+  } else if (popped.type === 'stroke') {
+
+    strokes.splice(popped.index, 1);
+
+    freehandBuffer.background(230);
+    freehandBuffer.push();
+    freehandBuffer.translate(width / 2, height / 2);
+    freehandBuffer.angleMode(DEGREES);
+
+    for (let s = 0; s < strokes.length; s++) {
+      let stroke = strokes[s];
+      let mirror = stroke.symmetry;       // CHANGED: use stroke's stored symmetry, not current global
+      let angle  = 360 / mirror;
+
+      // ADDED: middle loop — iterate over every segment in this stroke
+      for (let j = 0; j < stroke.segments.length; j++) {
+        let seg = stroke.segments[j];     // ADDED: get the segment object
+
+        // Inner symmetry loop — same structure as in draw()
+        for (let i = 0; i < mirror; i++) {
+          freehandBuffer.rotate(angle);
+          freehandBuffer.stroke(0);
+          freehandBuffer.strokeWeight(7);
+          freehandBuffer.line(seg.lineStartX, seg.lineStartY, seg.lineEndX, seg.lineEndY); // CHANGED: read from seg object
+          freehandBuffer.push();
+          freehandBuffer.scale(1, -1);
+          freehandBuffer.line(seg.lineStartX, seg.lineStartY, seg.lineEndX, seg.lineEndY); // CHANGED: read from seg object
+          freehandBuffer.pop();
+        }
+      }
+    }
+    freehandBuffer.pop();
+  }
+}
+
+function eraseCanvas() {
+  freehandBuffer.background(230);
+
+  strokes.splice(0, strokes.length);
+  actions.splice(0, actions.length);
+  placedStamps.splice(0, placedStamps.length);
+}
