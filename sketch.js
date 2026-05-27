@@ -1,12 +1,6 @@
-// to do : symmetry type slider - reflection, versus rotation, versus translation...
 
-// to do : integrate stamp presets that user can drag around
-
-// question : do we need more constraints? 
 let gui;
-var symmetry = 4;
-//let symmetry =4; // symmetry variable, defaults to 4, slider can be changed by user
-//let angle = 360/symmetry;
+var symmetry = 4; // default symmetry setting
 const strokes = []; // freehand lines - each is grouped as an array of segments per mousePressed/mouseReleased
 const actions = []; // records events in order
 
