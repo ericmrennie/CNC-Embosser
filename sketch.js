@@ -1,7 +1,5 @@
 // to do : symmetry type slider - reflection, versus rotation, versus translation...
 
-// to do : integrate stamp presets that user can drag around
-
 // question : do we need more constraints? 
 
 let symmetry =4; // symmetry variable, defaults to 4, slider can be changed by user
@@ -56,8 +54,6 @@ function gotData() {
   console.log(currentString);
 }
 
-
-
 function setup() {
   createCanvas(700, 500);
   angleMode(DEGREES);
@@ -84,7 +80,8 @@ function setup() {
   let command = `{"name": "go_to_xyz", "args": [${0}, ${0}, ${4}, ${speed}]}\n`;
   
   
-   // GO TO inputs:
+
+  // GO TO inputs:
   let inputX = createInput("0");
   inputX.parent("go-to-row");
 
@@ -96,7 +93,6 @@ function setup() {
   buttonGoTo.mousePressed(() =>
     callGoTo(parseFloat(inputX.value()), parseFloat(inputY.value()))
   );
-  
 }
 
 
