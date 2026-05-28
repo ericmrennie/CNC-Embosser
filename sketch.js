@@ -1,10 +1,3 @@
-
-// question : do we need more constraints? 
-let gui;
-var symmetry = 4;
-//let symmetry =4; // symmetry variable, defaults to 4, slider can be changed by user
-//let angle = 360/symmetry;
-
 // NEW websocket connection (instead of serial):
 let socket = null;
 const WS_URL = 'ws://localhost:8001/';  // ← Python server address
@@ -13,6 +6,9 @@ var symmetry = 4; // default symmetry setting
 const strokes = []; // freehand lines - each is grouped as an array of segments per mousePressed/mouseReleased
 const actions = []; // records events in order
 
+// SERIAL CONNECTION VARIABLES:
+let serial;
+let serialPort = "/dev/tty.usbmodem161560201";
 const MACHINE_X = 300;
 const MACHINE_Y = 218;
 const MM_TO_PX_RATIO = 2;
