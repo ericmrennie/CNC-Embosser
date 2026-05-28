@@ -227,13 +227,13 @@ function setup() {
   buildStampPanel();
   
     // INIT SERIAL CONNECTION:
-  serial = new p5.SerialPort();
-  serial.open(serialPort, { baudrate: 115200 });
-  serial.on("connected", serverConnected);
-  serial.on("data", gotData);
-  serial.on("error", gotError);
-  serial.on("open", gotOpen);
-  serial.on("close", gotClose);
+  // serial = new p5.SerialPort();
+  // serial.open(serialPort, { baudrate: 115200 });
+  // serial.on("connected", serverConnected);
+  // serial.on("data", gotData);
+  // serial.on("error", gotError);
+  // serial.on("open", gotOpen);
+  // serial.on("close", gotClose);
 
   let command = `{"name": "go_to_xyz", "args": [${0}, ${0}, ${4}, ${speed}]}\n`;
   
