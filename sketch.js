@@ -226,14 +226,14 @@ function setup() {
   // ADDED: build the stamp panel alongside the GUI
   buildStampPanel();
   
-    // INIT SERIAL CONNECTION:
-  serial = new p5.SerialPort();
-  serial.open(serialPort, { baudrate: 115200 });
-  serial.on("connected", serverConnected);
-  serial.on("data", gotData);
-  serial.on("error", gotError);
-  serial.on("open", gotOpen);
-  serial.on("close", gotClose);
+    // INIT SERIAL CONNECTION: - commented out because it made the UI break
+  // serial = new p5.SerialPort();
+  // serial.open(serialPort, { baudrate: 115200 });
+  // serial.on("connected", serverConnected);
+  // serial.on("data", gotData);
+  // serial.on("error", gotError);
+  // serial.on("open", gotOpen);
+  // serial.on("close", gotClose);
 
   let command = `{"name": "go_to_xyz", "args": [${0}, ${0}, ${4}, ${speed}]}\n`;
   
