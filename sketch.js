@@ -13,6 +13,9 @@ var symmetry = 4; // default symmetry setting
 const strokes = []; // freehand lines - each is grouped as an array of segments per mousePressed/mouseReleased
 const actions = []; // records events in order
 
+// SERIAL CONNECTION VARIABLES:
+let serial;
+let serialPort = "/dev/tty.usbmodem161560201";
 const MACHINE_X = 300;
 const MACHINE_Y = 218;
 const MM_TO_PX_RATIO = 2;
