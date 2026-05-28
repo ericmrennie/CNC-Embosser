@@ -256,6 +256,7 @@ function setup() {
   buildStampPanel();
   
     // INIT SERIAL CONNECTION:
+    // INIT SERIAL CONNECTION: - commented out because it made the UI break
   // serial = new p5.SerialPort();
   // serial.open(serialPort, { baudrate: 115200 });
   // serial.on("connected", serverConnected);
