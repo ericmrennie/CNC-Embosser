@@ -146,6 +146,7 @@
     };
 
     // pass through ...
+    this.addButton = function(label, callback) { qs.addButton(label, callback); };
     this.show = function() { qs.show(); };
     this.hide = function() { qs.hide(); };
     this.toggleVisibility = function() { qs.toggleVisibility(); };
