@@ -1,10 +1,3 @@
-
-// question : do we need more constraints? 
-let gui;
-var symmetry = 4;
-//let symmetry =4; // symmetry variable, defaults to 4, slider can be changed by user
-//let angle = 360/symmetry;
-
 // NEW websocket connection (instead of serial):
 let socket = null;
 const WS_URL = 'ws://localhost:8001/';  // ← Python server address
