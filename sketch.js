@@ -1,12 +1,18 @@
 
+// question : do we need more constraints? 
+let gui;
+var symmetry = 4;
+//let symmetry =4; // symmetry variable, defaults to 4, slider can be changed by user
+//let angle = 360/symmetry;
+
+// NEW websocket connection (instead of serial):
+let socket = null;
+const WS_URL = 'ws://localhost:8001/';  // ← Python server address
 let gui;
 var symmetry = 4; // default symmetry setting
 const strokes = []; // freehand lines - each is grouped as an array of segments per mousePressed/mouseReleased
 const actions = []; // records events in order
 
-// SERIAL CONNECTION VARIABLES:
-let serial;
-let serialPort = "/dev/tty.usbmodem161560201";
 const MACHINE_X = 300;
 const MACHINE_Y = 218;
 const MM_TO_PX_RATIO = 2;
@@ -160,42 +166,65 @@ function selectStamp(name) {
   });
 }
 // ─────────────────────────────────────────────────────────────────────────────
-
+// now editing call go to for websocket, not serial
 function callGoTo(x, y) {
   console.log("calling: go to at: " + x + ", " + y);
-  serial.write(`{"name": "go_to_xy", "args": [${x}, ${y}, ${speed}]}\n`);
+  sendCommand('go_to_xy', [x, y, speed]);
 }
 
-function serverConnected() {
-  updateConnectionStatus("Connected");
-  print("Connected to Server");
-}
 
+// now editing this for websocket 
 function gotError(theerror) {
   print(theerror);
   updateConnectionStatus("Error: " + theerror);
 }
 
+// editing this for websocket
 function updateConnectionStatus(status) {
-  document.getElementById(
-    "connection-status"
-  ).innerHTML = `Connection to ${serialPort} : ${status}`;
+document.getElementById("connection-status").innerHTML =
+  `Connection to ${WS_URL} : ${status}`;
 }
 
-function gotOpen() {
-  print("Serial Port is Open");
-  updateConnectionStatus("Open");
+//  WebSocket Connection Functions
+function connectWebSocket() {
+  socket = new WebSocket(WS_URL);
+  
+  // Connection opens
+  socket.onopen = () => {
+    console.log("WebSocket connected to stepdance board");
+    updateConnectionStatus("Connected");
+  };
+  
+  // When message arrives FROM the board
+  socket.onmessage = (event) => {
+    console.log('Message from board:', event.data);
+    // You could parse and display feedback here if needed
+  };
+  
+  // If something goes wrong
+  socket.onerror = (error) => {
+    console.error("WebSocket error:", error);
+    updateConnectionStatus("Error: " + error);
+  };
+  
+  // When connection closes
+  socket.onclose = () => {
+    console.log("WebSocket disconnected");
+    updateConnectionStatus("Closed");
+  };
 }
 
-function gotClose() {
-  print("Serial Port is Closed");
-  updateConnectionStatus("Closed");
-}
-
-function gotData() {
-  let currentString = serial.readStringUntil("\n");
-  if (currentString == "") return;
-  console.log(currentString);
+// Helper to send RPC commands TO the board
+function sendCommand(commandName, args = []) {
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    console.warn("WebSocket not connected");
+    return;
+  }
+  
+  // Format matches what Python server expects: { "name": "...", "args": [...] }
+  const message = JSON.stringify({ name: commandName, args: args });
+  console.log("Sending command:", message);
+  socket.send(message);
 }
 
 function setup() {
@@ -227,6 +256,7 @@ function setup() {
   buildStampPanel();
   
     // INIT SERIAL CONNECTION:
+    // INIT SERIAL CONNECTION: - commented out because it made the UI break
   // serial = new p5.SerialPort();
   // serial.open(serialPort, { baudrate: 115200 });
   // serial.on("connected", serverConnected);
@@ -238,7 +268,10 @@ function setup() {
   let command = `{"name": "go_to_xyz", "args": [${0}, ${0}, ${4}, ${speed}]}\n`;
   
   
-   // GO TO inputs:
+  // INIT WEBSOCKET CONNECTION:
+  connectWebSocket();
+
+  // GO TO inputs:
   let inputX = createInput("0");
   inputX.parent("go-to-row");
 
