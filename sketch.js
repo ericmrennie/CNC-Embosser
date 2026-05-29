@@ -279,6 +279,7 @@ function buildStrokePoints(stroke) {
 }
 
 function send() {
+  let batchSend = [];
   // Build the complete flat list of all points across all strokes and symmetry copies
   const allPoints = [];
 
@@ -300,4 +301,43 @@ function send() {
   console.log(`total strokes (before symmetry): ${actions.filter(a => a.type === 'stroke').length}`);
   console.log(`total points to send (including all symmetry copies): ${allPoints.length}`);
   console.log('flat point list:', allPoints);
+
+  if (allPoints.length === 0) return;
+  while (allPoints.length) {
+    if (allPoints.length >= 100) {
+      batchSend.push([allPoints.splice(0, 100)]);
+    } else {
+      batchSend.push([allPoints.splice(0, allPoints.length)]);
+    }
+  }
+  console.log('this is batchSend: ', batchSend);
+
+  let waitTime = 1000;
+  while (batchSend.length) {
+    let currentBatch = batchSend.pop();
+    console.log("this is the currentBatch", currentBatch);
+
+
+    waitTime += 1000;
+    setTimeout(() => {
+      // console.log(" timeout")
+      console.log("timeout this is the currentBatch", currentBatch);
+      for (let i = 0; i < currentBatch.length; i++) {
+        serial.write(`{"name": "go_to_xyz", "args": [${currentBatch[i].x}, ${currentBatch[i].y}, ${currentBatch[i].z}, ${speed}]}\n`);
+      }
+
+    //   // if (batchSend.length === 0) return;
+    }, waitTime);
+  }
 }
+
+// Function that
+// function send()
+// set timeout {
+// - pops the next batch off array
+// - send it
+// }
+// - if not done: call itself 
+// send()
+
+// serial.write(`{"name": "go_to_xyz", "args": [${machineX}, ${machineY}, ${machineZ1}, ${speed}]}\n`);
