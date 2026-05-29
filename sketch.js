@@ -5,12 +5,18 @@ var symmetry = 4;
 const strokes = [];
 const actions = [];
 
+//serial connections
 let serial;
 let serialPort = "/dev/tty.usbmodem161560201";
-const MACHINE_X = 300;
-const MACHINE_Y = 218;
-const MM_TO_PX_RATIO = 2;
 
+// machine constants
+const MACHINE_X = 200;
+const MACHINE_Y = 200;
+const MM_TO_PX_RATIO = 3;
+const DISPLAY_WIDTH = MACHINE_X * MM_TO_PX_RATIO;
+const DISPLAY_HEIGHT = MACHINE_Y * MM_TO_PX_RATIO;
+
+// speed constant
 const speed = 15.0;
 
 let freehandBuffer;
@@ -75,12 +81,23 @@ function isOverUI(px, py) {
   });
 }
 
+// function to convert p5 coords to machine coords 
+function p5ToArduino(p5_x, p5_y) {
+  // p5 (0, 0) → Arduino (30, 20)
+  // p5 (200, 200) → Arduino (230, 220)
+  const arduino_x = 30 + (p5_x / 200) * (230 - 30);
+  const arduino_y = 20 + (p5_y / 200) * (220 - 20);
+  return { x: arduino_x, y: arduino_y };
+}
+
 function setup() {
-  createCanvas(windowWidth, windowHeight);
+  let c = createCanvas(DISPLAY_WIDTH, DISPLAY_HEIGHT);
+  c.position((windowWidth - DISPLAY_WIDTH) / 2, (windowHeight - DISPLAY_HEIGHT) / 2);
+
   angleMode(DEGREES);
   background(230);
 
-  freehandBuffer = createGraphics(windowWidth, windowHeight);
+  freehandBuffer = createGraphics(MACHINE_X, MACHINE_Y);
   freehandBuffer.background(230);
   freehandBuffer.angleMode(DEGREES);
 
@@ -97,22 +114,31 @@ function setup() {
 function draw() {
   let mirror = symmetry;
   let angle = 360 / mirror;
+  background(230);
+  push();
+  scale(MM_TO_PX_RATIO); // Scale the logical drawing up to the visible canvas size
 
   image(freehandBuffer, 0, 0);
-  translate(width / 2, height / 2);
+  translate(MACHINE_X / 2, MACHINE_Y / 2);
+
+  const mouseLogicalX = mouseX / MM_TO_PX_RATIO;
+  const mouseLogicalY = mouseY / MM_TO_PX_RATIO;
+  const pmouseLogicalX = pmouseX / MM_TO_PX_RATIO;
+  const pmouseLogicalY = pmouseY / MM_TO_PX_RATIO;
 
   if (drawingActive && mouseIsPressed &&
-      mouseX > 0 && mouseX < width && mouseY > 0 && mouseY < height) {
+      mouseLogicalX > 0 && mouseLogicalX < MACHINE_X &&
+      mouseLogicalY > 0 && mouseLogicalY < MACHINE_Y) {
 
-    let lineStartX = mouseX - width / 2;
-    let lineStartY = mouseY - height / 2;
-    let lineEndX   = pmouseX - width / 2;
-    let lineEndY   = pmouseY - height / 2;
+    let lineStartX = mouseLogicalX - MACHINE_X / 2;
+    let lineStartY = mouseLogicalY - MACHINE_Y / 2;
+    let lineEndX   = pmouseLogicalX - MACHINE_X / 2;
+    let lineEndY   = pmouseLogicalY - MACHINE_Y / 2;
 
     activeStroke.segments.push({ lineStartX, lineStartY, lineEndX, lineEndY });
 
     freehandBuffer.push();
-    freehandBuffer.translate(width / 2, height / 2);
+    freehandBuffer.translate(MACHINE_X / 2, MACHINE_Y / 2);
     freehandBuffer.angleMode(DEGREES);
     for (let i = 0; i < mirror; i++) {
       freehandBuffer.rotate(angle);
@@ -126,6 +152,7 @@ function draw() {
     }
     freehandBuffer.pop();
   }
+  pop();
 }
 
 function mousePressed() {
@@ -146,13 +173,12 @@ function mouseReleased() {
 }
 
 function windowResized() {
-  resizeCanvas(windowWidth, windowHeight);
-  let old = freehandBuffer;
-  freehandBuffer = createGraphics(windowWidth, windowHeight);
-  freehandBuffer.background(230);
-  freehandBuffer.angleMode(DEGREES);
-  freehandBuffer.image(old, 0, 0);
-  old.remove();
+  const canvasElt = document.querySelector('canvas');
+  if (canvasElt) {
+    canvasElt.style.position = 'absolute';
+    canvasElt.style.left = `${(windowWidth - DISPLAY_WIDTH) / 2}px`;
+    canvasElt.style.top = `${(windowHeight - DISPLAY_HEIGHT) / 2}px`;
+  }
 }
 
 function undo() {
@@ -165,7 +191,7 @@ function undo() {
 
     freehandBuffer.background(230);
     freehandBuffer.push();
-    freehandBuffer.translate(width / 2, height / 2);
+    freehandBuffer.translate(MACHINE_X / 2, MACHINE_Y / 2);
     freehandBuffer.angleMode(DEGREES);
 
     for (let s = 0; s < strokes.length; s++) {
@@ -263,6 +289,14 @@ function send() {
       for (let p of strokePoints) allPoints.push(p);
     }
   }
+
+   const arduinoPoints = allPoints.map(p => {
+    const p5x = p.x + MACHINE_X / 2;
+    const p5y = p.y + MACHINE_Y / 2;
+    const converted = p5ToArduino(p5x, p5y);
+    return { x: converted.x, y: converted.y, z: p.z };
+  });
+  console.log('converted points for Arduino:', arduinoPoints);
 
   console.log(`total strokes (before symmetry): ${actions.filter(a => a.type === 'stroke').length}`);
   console.log(`total points to send (including all symmetry copies): ${allPoints.length}`);
