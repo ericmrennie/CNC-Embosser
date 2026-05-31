@@ -5,6 +5,21 @@ var symmetry = 4;
 const strokes = [];
 const actions = [];
 
+// Suppress Chrome extension messaging errors that don't affect functionality
+window.addEventListener('error', (event) => {
+  if (event.message && event.message.includes('listener indicated an asynchronous response')) {
+    console.warn('(Suppressed extension messaging error - not affecting program)');
+    event.preventDefault();
+  }
+}, true);
+
+window.addEventListener('unhandledrejection', (event) => {
+  if (event.reason && event.reason.message && event.reason.message.includes('listener indicated an asynchronous response')) {
+    console.warn('(Suppressed extension messaging promise rejection)');
+    event.preventDefault();
+  }
+});
+
 //serial connections
 let serial;
 let serialPort = "/dev/tty.usbmodem161560201";
@@ -16,12 +31,18 @@ const MM_TO_PX_RATIO = 3;
 const DISPLAY_WIDTH = MACHINE_X * MM_TO_PX_RATIO;
 const DISPLAY_HEIGHT = MACHINE_Y * MM_TO_PX_RATIO;
 
+// Swap pen position constants if the machine's up/down axes are reversed.
+const PEN_UP_Z = 0;
+const PEN_DOWN_Z = 4;
+
 // speed constant
 const speed = 15.0;
 
 let freehandBuffer;
 let activeStroke = null;
 let drawingActive = false;
+let debugPreviewCommands = null;
+let debugPreviewExpiresAt = 0;
 
 function callGoTo(x, y) {
   console.log("calling: go to at: " + x + ", " + y);
@@ -58,17 +79,24 @@ function connectWebSocket() {
   socket.onclose = () => {
     console.log("WebSocket disconnected");
     updateConnectionStatus("Closed");
+    // Auto-reconnect after 2 seconds
+    setTimeout(connectWebSocket, 2000);
   };
 }
 
 function sendCommand(commandName, args = []) {
   if (!socket || socket.readyState !== WebSocket.OPEN) {
-    console.warn("WebSocket not connected");
-    return;
+    console.error("WebSocket NOT OPEN (state:", socket?.readyState, "), command NOT sent:", commandName, args);
+    return false;
   }
   const message = JSON.stringify({ name: commandName, args: args });
-  console.log("Sending command:", message);
-  socket.send(message);
+  try {
+    socket.send(message);
+    return true;
+  } catch (err) {
+    console.error('FAILED to send websocket message:', err.message, message);
+    return false;
+  }
 }
 
 function isOverUI(px, py) {
@@ -81,12 +109,12 @@ function isOverUI(px, py) {
   });
 }
 
-// function to convert p5 coords to machine coords 
+// function to convert p5 logical coordinates to Arduino coordinates
 function p5ToArduino(p5_x, p5_y) {
-  // p5 (0, 0) → Arduino (30, 20)
-  // p5 (200, 200) → Arduino (230, 220)
-  const arduino_x = 30 + (p5_x / 200) * (230 - 30);
-  const arduino_y = 20 + (p5_y / 200) * (220 - 20);
+  // p5 logical coordinates are 0..MACHINE_X and 0..MACHINE_Y
+  // map those ranges into Arduino workspace.
+  const arduino_x = 30 + (p5_x / MACHINE_X) * (230 - 30);
+  const arduino_y = 20 + (p5_y / MACHINE_Y) * (220 - 20);
   return { x: arduino_x, y: arduino_y };
 }
 
@@ -143,7 +171,7 @@ function draw() {
     for (let i = 0; i < mirror; i++) {
       freehandBuffer.rotate(angle);
       freehandBuffer.stroke(0);
-      freehandBuffer.strokeWeight(7);
+      freehandBuffer.strokeWeight(2);
       freehandBuffer.line(lineStartX, lineStartY, lineEndX, lineEndY);
       freehandBuffer.push();
       freehandBuffer.scale(1, -1);
@@ -152,6 +180,33 @@ function draw() {
     }
     freehandBuffer.pop();
   }
+  // Draw debug preview overlay if present (set by send())
+  if (debugPreviewCommands && millis() < debugPreviewExpiresAt) {
+    drawPreviewOverlay(debugPreviewCommands);
+  } else {
+    debugPreviewCommands = null;
+  }
+
+  pop();
+}
+
+// Draw preview overlay from main draw loop so it isn't immediately erased.
+function drawPreviewOverlay(commands) {
+  // We're already inside a scaled/translated frame in `draw()`,
+  // so draw in logical p5 coordinates (centered) without re-scaling.
+  push();
+  noFill();
+  stroke(255, 0, 0);
+  strokeWeight(2 / MM_TO_PX_RATIO);
+
+  const max = Math.min(commands.length, 1000);
+  for (let i = 0; i < max; i++) {
+    const c = commands[i];
+    const px = ((c.x - 30) / (230 - 30)) * MACHINE_X - MACHINE_X / 2;
+    const py = ((c.y - 20) / (220 - 20)) * MACHINE_Y - MACHINE_Y / 2;
+    ellipse(px, py, 4 / MM_TO_PX_RATIO, 4 / MM_TO_PX_RATIO);
+  }
+
   pop();
 }
 
@@ -205,7 +260,7 @@ function undo() {
         for (let i = 0; i < mirror; i++) {
           freehandBuffer.rotate(angle);
           freehandBuffer.stroke(0);
-          freehandBuffer.strokeWeight(7);
+          freehandBuffer.strokeWeight(2);
           freehandBuffer.line(seg.lineStartX, seg.lineStartY, seg.lineEndX, seg.lineEndY);
           freehandBuffer.push();
           freehandBuffer.scale(1, -1);
@@ -278,57 +333,201 @@ function buildStrokePoints(stroke) {
   return points;
 }
 
+function convertCenteredToArduino(point) {
+  const p5x = point.x + MACHINE_X / 2;
+  const p5y = point.y + MACHINE_Y / 2;
+  return p5ToArduino(p5x, p5y);
+}
+
+function simplifyLinePoints(points, maxAngleDeg = 8) {
+  if (points.length <= 2) return points.slice();
+  const threshold = Math.cos(maxAngleDeg * Math.PI / 180);
+  const simplified = [points[0]];
+
+  for (let i = 1; i < points.length - 1; i++) {
+    const a = simplified[simplified.length - 1];
+    const b = points[i];
+    const c = points[i + 1];
+
+    const abx = b.x - a.x;
+    const aby = b.y - a.y;
+    const bcx = c.x - b.x;
+    const bcy = c.y - b.y;
+    const lenAB = Math.hypot(abx, aby);
+    const lenBC = Math.hypot(bcx, bcy);
+
+    if (lenAB < 0.01 || lenBC < 0.01) {
+      continue;
+    }
+
+    const dot = (abx * bcx + aby * bcy) / (lenAB * lenBC);
+    if (dot <= threshold) {
+      simplified.push(b);
+    }
+  }
+
+  simplified.push(points[points.length - 1]);
+  return simplified;
+}
+
+// Draw a quick preview of the commands that will be sent.
+// This helps verify ordering, density, and whether points match the drawn path.
+function previewCommands(commands, limit = 200) {
+  push();
+  scale(MM_TO_PX_RATIO);
+  translate(MACHINE_X / 2, MACHINE_Y / 2);
+  noFill();
+  stroke(255, 0, 0);
+  strokeWeight(2 / MM_TO_PX_RATIO);
+
+  const max = Math.min(limit, commands.length);
+  for (let i = 0; i < max; i++) {
+    const c = commands[i];
+    // Map Arduino coords back to p5 logical coordinates
+    const px = ((c.x - 30) / (230 - 30)) * MACHINE_X - MACHINE_X / 2;
+    const py = ((c.y - 20) / (220 - 20)) * MACHINE_Y - MACHINE_Y / 2;
+    ellipse(px, py, 3 / MM_TO_PX_RATIO, 3 / MM_TO_PX_RATIO);
+  }
+  pop();
+}
+
+function buildStrokeCommands(stroke) {
+  const commands = [];
+  const mirror = stroke.symmetry;
+  const angleDeg = 360 / mirror;
+  const MAX_STEP_MM = 3.5; // coarser stepping to reduce command count
+
+  for (let i = 0; i < mirror; i++) {
+    for (let reflected of [false, true]) {
+      const linePoints = [];
+      for (let j = 0; j < stroke.segments.length; j++) {
+        const seg = stroke.segments[j];
+        const start = applySymmetryTransform(seg.lineStartX, seg.lineStartY, i, angleDeg, reflected);
+        linePoints.push(start);
+        if (j === stroke.segments.length - 1) {
+          const end = applySymmetryTransform(seg.lineEndX, seg.lineEndY, i, angleDeg, reflected);
+          linePoints.push(end);
+        }
+      }
+
+      if (linePoints.length === 0) continue;
+
+      const simplifiedPoints = simplifyLinePoints(linePoints, 8);
+
+      // Interpolate between consecutive simplified points so the machine receives
+      // smaller linear moves without overloading the queue.
+      const interpPoints = [];
+      for (let k = 0; k < simplifiedPoints.length - 1; k++) {
+        const a = simplifiedPoints[k];
+        const b = simplifiedPoints[k + 1];
+        const dx = b.x - a.x;
+        const dy = b.y - a.y;
+        const dist = Math.hypot(dx, dy);
+        interpPoints.push(a);
+        if (dist > MAX_STEP_MM) {
+          const steps = Math.ceil(dist / MAX_STEP_MM);
+          for (let s = 1; s < steps; s++) {
+            const t = s / steps;
+            interpPoints.push({ x: a.x + dx * t, y: a.y + dy * t });
+          }
+        }
+      }
+      interpPoints.push(simplifiedPoints[simplifiedPoints.length - 1]);
+
+      const firstArduino = convertCenteredToArduino(interpPoints[0]);
+      commands.push({ x: firstArduino.x, y: firstArduino.y, z: PEN_UP_Z });
+      commands.push({ x: firstArduino.x, y: firstArduino.y, z: PEN_DOWN_Z });
+
+      for (let k = 1; k < interpPoints.length; k++) {
+        const arduinoPoint = convertCenteredToArduino(interpPoints[k]);
+        commands.push({ x: arduinoPoint.x, y: arduinoPoint.y, z: PEN_DOWN_Z });
+      }
+
+      const lastArduino = convertCenteredToArduino(interpPoints[interpPoints.length - 1]);
+      commands.push({ x: lastArduino.x, y: lastArduino.y, z: PEN_UP_Z });
+    }
+  }
+
+  return commands;
+}
+
 function send() {
+  // Check that WebSocket is ready before starting
+  if (!socket || socket.readyState !== WebSocket.OPEN) {
+    console.error('ERROR: WebSocket not connected. Cannot send. State:', socket?.readyState);
+    updateConnectionStatus('Not connected - cannot send.');
+    return;
+  }
+
   let batchSend = [];
-  // Build the complete flat list of all points across all strokes and symmetry copies
-  const allPoints = [];
+  const allCommands = [];
 
   for (let i = 0; i < actions.length; i++) {
     if (actions[i].type === 'stroke') {
-      const strokePoints = buildStrokePoints(actions[i].strokeRef);
-      for (let p of strokePoints) allPoints.push(p);
+      allCommands.push(...buildStrokeCommands(actions[i].strokeRef));
     }
   }
 
-   const arduinoPoints = allPoints.map(p => {
-    const p5x = p.x + MACHINE_X / 2;
-    const p5y = p.y + MACHINE_Y / 2;
-    const converted = p5ToArduino(p5x, p5y);
-    return { x: converted.x, y: converted.y, z: p.z };
-  });
-  console.log('converted points for Arduino:', arduinoPoints);
+  console.log('command list for Arduino:', allCommands);
+  debugPreviewCommands = allCommands.slice(0, 1000);
+  debugPreviewExpiresAt = millis() + 5000;
+  console.log(`total commands to send: ${allCommands.length}`);
 
-  console.log(`total strokes (before symmetry): ${actions.filter(a => a.type === 'stroke').length}`);
-  console.log(`total points to send (including all symmetry copies): ${allPoints.length}`);
-  console.log('flat point list:', allPoints);
+  if (allCommands.length === 0) return;
 
-  if (allPoints.length === 0) return;
-  while (allPoints.length) {
-    if (allPoints.length >= 100) {
-      batchSend.push([allPoints.splice(0, 100)]);
-    } else {
-      batchSend.push([allPoints.splice(0, allPoints.length)]);
-    }
+  // Split into batches of up to 100 commands
+  while (allCommands.length) {
+    batchSend.push(allCommands.splice(0, 100));
   }
-  console.log('this is batchSend: ', batchSend);
 
-  let waitTime = 1000;
-  while (batchSend.length) {
-    let currentBatch = batchSend.pop();
-    console.log("this is the currentBatch", currentBatch);
+  // Always append a final pen-up command to ensure the pen finishes raised
+  const finalPenUp = { x: 100, y: 100, z: PEN_UP_Z };
+  batchSend[batchSend.length - 1].push(finalPenUp);
+  console.log(`>>> APPENDED FINAL PEN-UP to last batch. Z value: ${PEN_UP_Z}`);
 
+  console.log(`total batches: ${batchSend.length}`);
+  let batchIndex = 0;
+  const totalBatches = batchSend.length;
+  let failedCommands = 0;
 
-    waitTime += 1000;
-    setTimeout(() => {
-      // console.log(" timeout")
-      console.log("timeout this is the currentBatch", currentBatch);
-      for (let i = 0; i < currentBatch.length; i++) {
-        serial.write(`{"name": "go_to_xyz", "args": [${currentBatch[i].x}, ${currentBatch[i].y}, ${currentBatch[i].z}, ${speed}]}\n`);
+  // Send batches sequentially with proper closure capture
+  function sendNextBatch() {
+    if (batchIndex >= totalBatches) {
+      console.log(`\n===== SEND COMPLETE =====${failedCommands > 0 ? ' (' + failedCommands + ' commands failed)' : ''}`);
+      // One more check: log the last sent batch to confirm pen-up was in it
+      if (batchSend.length > 0) {
+        const lastBatch = batchSend[batchSend.length - 1];
+        const lastCmd = lastBatch[lastBatch.length - 1];
+        console.log(`Last command sent was: x=${lastCmd.x}, y=${lastCmd.y}, z=${lastCmd.z}`);
       }
+      return;
+    }
 
-    //   // if (batchSend.length === 0) return;
-    }, waitTime);
+    // Re-check WebSocket before each batch
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      console.error(`STOPPING: WebSocket disconnected before batch ${batchIndex + 1}. Sent ${batchIndex}/${totalBatches} batches.`);
+      return;
+    }
+
+    const batch = batchSend[batchIndex];
+    console.log(`\n>>> Sending batch ${batchIndex + 1}/${totalBatches} (${batch.length} commands)`);
+
+    let sentInBatch = 0;
+    for (const cmd of batch) {
+      if (sendCommand('go_to_xyz', [cmd.x, cmd.y, cmd.z, speed])) {
+        sentInBatch++;
+      } else {
+        failedCommands++;
+      }
+    }
+    console.log(`    ✓ ${sentInBatch}/${batch.length} commands sent`);
+
+    batchIndex++;
+    // Wait 500ms between batches to allow the Arduino queue to drain
+    setTimeout(sendNextBatch, 500);
   }
+
+  sendNextBatch();
 }
 
 // Function that
