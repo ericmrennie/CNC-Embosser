@@ -1,3 +1,5 @@
+// note: need to make it so if someone makes a slow stroke, there isnt a million dots being drawn
+
 let socket = null;
 const WS_URL = 'ws://localhost:8001/';
 let gui;
@@ -130,7 +132,7 @@ function setup() {
   freehandBuffer.angleMode(DEGREES);
 
   gui = createGui('CNC Embosser');
-  sliderRange(1, 8, 1);
+  sliderRange(0, 8, 1);
   gui.addGlobals('symmetry');
   gui.addButton('Undo', undo);
   gui.addButton('Erase', eraseCanvas);
@@ -138,6 +140,10 @@ function setup() {
 
   connectWebSocket();
 }
+
+let lastRecordedX;
+let lastRecordedY;
+let distanceThreshold = 2;
 
 function draw() {
   let mirror = symmetry;
@@ -156,29 +162,47 @@ function draw() {
 
   if (drawingActive && mouseIsPressed &&
       mouseLogicalX > 0 && mouseLogicalX < MACHINE_X &&
-      mouseLogicalY > 0 && mouseLogicalY < MACHINE_Y) {
+      mouseLogicalY > 0 && mouseLogicalY < MACHINE_Y ) {
 
     let lineStartX = mouseLogicalX - MACHINE_X / 2;
     let lineStartY = mouseLogicalY - MACHINE_Y / 2;
     let lineEndX   = pmouseLogicalX - MACHINE_X / 2;
     let lineEndY   = pmouseLogicalY - MACHINE_Y / 2;
 
-    activeStroke.segments.push({ lineStartX, lineStartY, lineEndX, lineEndY });
+    let dx = mouseLogicalX - lastRecordedX;
+    let dy = mouseLogicalY - lastRecordedY;
+    let distance = Math.hypot(dx, dy);
 
-    freehandBuffer.push();
-    freehandBuffer.translate(MACHINE_X / 2, MACHINE_Y / 2);
-    freehandBuffer.angleMode(DEGREES);
-    for (let i = 0; i < mirror; i++) {
-      freehandBuffer.rotate(angle);
+    // Always record the first segment, then enforce distance threshold
+    if (activeStroke.segments.length === 0 || distance >= distanceThreshold) {
+      activeStroke.segments.push({ lineStartX, lineStartY, lineEndX, lineEndY });
+      lastRecordedX = mouseLogicalX;
+      lastRecordedY = mouseLogicalY;
+    }
+
+    if (mirror === 0) {
+      freehandBuffer.push();
+      freehandBuffer.translate(MACHINE_X / 2, MACHINE_Y / 2);
       freehandBuffer.stroke(0);
       freehandBuffer.strokeWeight(2);
       freehandBuffer.line(lineStartX, lineStartY, lineEndX, lineEndY);
+      freehandBuffer.pop();
+    } else {
       freehandBuffer.push();
-      freehandBuffer.scale(1, -1);
-      freehandBuffer.line(lineStartX, lineStartY, lineEndX, lineEndY);
+      freehandBuffer.translate(MACHINE_X / 2, MACHINE_Y / 2);
+      freehandBuffer.angleMode(DEGREES);
+      for (let i = 0; i < mirror; i++) {
+        freehandBuffer.rotate(angle);
+        freehandBuffer.stroke(0);
+        freehandBuffer.strokeWeight(2);
+        freehandBuffer.line(lineStartX, lineStartY, lineEndX, lineEndY);
+        freehandBuffer.push();
+        freehandBuffer.scale(1, -1);
+        freehandBuffer.line(lineStartX, lineStartY, lineEndX, lineEndY);
+        freehandBuffer.pop();
+      }
       freehandBuffer.pop();
     }
-    freehandBuffer.pop();
   }
   // Draw debug preview overlay if present (set by send())
   if (debugPreviewCommands && millis() < debugPreviewExpiresAt) {
@@ -212,6 +236,8 @@ function mousePressed() {
   if (isOverUI(mouseX, mouseY)) return;
   drawingActive = true;
   activeStroke = { segments: [], symmetry: symmetry };
+  lastRecordedX = mouseX / MM_TO_PX_RATIO;
+  lastRecordedY = mouseY / MM_TO_PX_RATIO;
 }
 
 function mouseReleased() {
@@ -524,7 +550,6 @@ function send() {
     // Wait 500ms between batches to allow the Arduino queue to drain
     setTimeout(sendNextBatch, 5000);
   }
-
   sendNextBatch();
 }
 
