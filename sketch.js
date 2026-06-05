@@ -269,31 +269,44 @@ function undo() {
     if (idx !== -1) strokes.splice(idx, 1);
 
     freehandBuffer.background(230);
-    freehandBuffer.push();
-    freehandBuffer.translate(MACHINE_X / 2, MACHINE_Y / 2);
-    freehandBuffer.angleMode(DEGREES);
-
+    // Redraw all remaining strokes. Handle symmetry==0 as a special-case
     for (let s = 0; s < strokes.length; s++) {
       let stroke = strokes[s];
       let mirror = stroke.symmetry;
-      let angle  = 360 / mirror;
 
-      for (let j = 0; j < stroke.segments.length; j++) {
-        let seg = stroke.segments[j];
-
-        for (let i = 0; i < mirror; i++) {
-          freehandBuffer.rotate(angle);
-          freehandBuffer.stroke(0);
-          freehandBuffer.strokeWeight(2);
+      if (mirror === 0) {
+        // Draw each segment once, centered, no reflection
+        freehandBuffer.push();
+        freehandBuffer.translate(MACHINE_X / 2, MACHINE_Y / 2);
+        freehandBuffer.stroke(0);
+        freehandBuffer.strokeWeight(2);
+        for (let j = 0; j < stroke.segments.length; j++) {
+          let seg = stroke.segments[j];
           freehandBuffer.line(seg.lineStartX, seg.lineStartY, seg.lineEndX, seg.lineEndY);
-          freehandBuffer.push();
-          freehandBuffer.scale(1, -1);
-          freehandBuffer.line(seg.lineStartX, seg.lineStartY, seg.lineEndX, seg.lineEndY);
-          freehandBuffer.pop();
         }
+        freehandBuffer.pop();
+      } else {
+        let angle  = 360 / mirror;
+        freehandBuffer.push();
+        freehandBuffer.translate(MACHINE_X / 2, MACHINE_Y / 2);
+        freehandBuffer.angleMode(DEGREES);
+
+        for (let j = 0; j < stroke.segments.length; j++) {
+          let seg = stroke.segments[j];
+          for (let i = 0; i < mirror; i++) {
+            freehandBuffer.rotate(angle);
+            freehandBuffer.stroke(0);
+            freehandBuffer.strokeWeight(2);
+            freehandBuffer.line(seg.lineStartX, seg.lineStartY, seg.lineEndX, seg.lineEndY);
+            freehandBuffer.push();
+            freehandBuffer.scale(1, -1);
+            freehandBuffer.line(seg.lineStartX, seg.lineStartY, seg.lineEndX, seg.lineEndY);
+            freehandBuffer.pop();
+          }
+        }
+        freehandBuffer.pop();
       }
     }
-    freehandBuffer.pop();
   }
 }
 
@@ -323,33 +336,44 @@ function applySymmetryTransform(x, y, rotationIndex, angleDeg, reflect) {
 // Returns an array of { x, y, z } where z = -1 (pen down) or 1 (pen up).
 function buildStrokePoints(stroke) {
   const mirror   = stroke.symmetry;
-  const angleDeg = 360 / mirror;
+  const angleDeg = mirror === 0 ? 0 : 360 / mirror;
   const segments = stroke.segments;
   const points   = [];
 
-  // Outer loop: mirror rotations × 2 (normal + reflected)
-  for (let i = 0; i < mirror; i++) {
-    for (let reflected of [false, true]) {
-
-      // Collect the unique points along this symmetry copy of the stroke.
-      // Segments share endpoints, so we take the start of every segment
-      // then append the final endpoint once at the end.
-      const linePoints = [];
-      for (let j = 0; j < segments.length; j++) {
-        const seg = segments[j];
-        const start = applySymmetryTransform(seg.lineStartX, seg.lineStartY, i, angleDeg, reflected);
-        linePoints.push(start);
-        // On the last segment, also add the end point
-        if (j === segments.length - 1) {
-          const end = applySymmetryTransform(seg.lineEndX, seg.lineEndY, i, angleDeg, reflected);
-          linePoints.push(end);
-        }
+  if (mirror === 0) {
+    // Single copy, no reflection
+    const linePoints = [];
+    for (let j = 0; j < segments.length; j++) {
+      const seg = segments[j];
+      const start = applySymmetryTransform(seg.lineStartX, seg.lineStartY, 0, angleDeg, false);
+      linePoints.push(start);
+      if (j === segments.length - 1) {
+        const end = applySymmetryTransform(seg.lineEndX, seg.lineEndY, 0, angleDeg, false);
+        linePoints.push(end);
       }
-
-      // First point: pen down (z = -1). Last point: pen up (z = 1). All others stay down.
-      for (let k = 0; k < linePoints.length; k++) {
-        const isLast = k === linePoints.length - 1;
-        points.push({ x: linePoints[k].x, y: linePoints[k].y, z: isLast ? 1 : -1 });
+    }
+    for (let k = 0; k < linePoints.length; k++) {
+      const isLast = k === linePoints.length - 1;
+      points.push({ x: linePoints[k].x, y: linePoints[k].y, z: isLast ? 1 : -1 });
+    }
+  } else {
+    // Outer loop: mirror rotations × 2 (normal + reflected)
+    for (let i = 0; i < mirror; i++) {
+      for (let reflected of [false, true]) {
+        const linePoints = [];
+        for (let j = 0; j < segments.length; j++) {
+          const seg = segments[j];
+          const start = applySymmetryTransform(seg.lineStartX, seg.lineStartY, i, angleDeg, reflected);
+          linePoints.push(start);
+          if (j === segments.length - 1) {
+            const end = applySymmetryTransform(seg.lineEndX, seg.lineEndY, i, angleDeg, reflected);
+            linePoints.push(end);
+          }
+        }
+        for (let k = 0; k < linePoints.length; k++) {
+          const isLast = k === linePoints.length - 1;
+          points.push({ x: linePoints[k].x, y: linePoints[k].y, z: isLast ? 1 : -1 });
+        }
       }
     }
   }
@@ -418,28 +442,24 @@ function previewCommands(commands, limit = 200) {
 function buildStrokeCommands(stroke) {
   const commands = [];
   const mirror = stroke.symmetry;
-  const angleDeg = 360 / mirror;
+  const angleDeg = mirror === 0 ? 0 : 360 / mirror;
   const MAX_STEP_MM = 3.5; // coarser stepping to reduce command count
 
-  for (let i = 0; i < mirror; i++) {
-    for (let reflected of [false, true]) {
-      const linePoints = [];
-      for (let j = 0; j < stroke.segments.length; j++) {
-        const seg = stroke.segments[j];
-        const start = applySymmetryTransform(seg.lineStartX, seg.lineStartY, i, angleDeg, reflected);
-        linePoints.push(start);
-        if (j === stroke.segments.length - 1) {
-          const end = applySymmetryTransform(seg.lineEndX, seg.lineEndY, i, angleDeg, reflected);
-          linePoints.push(end);
-        }
+  if (mirror === 0) {
+    // Single copy, no reflection
+    const linePoints = [];
+    for (let j = 0; j < stroke.segments.length; j++) {
+      const seg = stroke.segments[j];
+      const start = applySymmetryTransform(seg.lineStartX, seg.lineStartY, 0, angleDeg, false);
+      linePoints.push(start);
+      if (j === stroke.segments.length - 1) {
+        const end = applySymmetryTransform(seg.lineEndX, seg.lineEndY, 0, angleDeg, false);
+        linePoints.push(end);
       }
+    }
 
-      if (linePoints.length === 0) continue;
-
+    if (linePoints.length > 0) {
       const simplifiedPoints = simplifyLinePoints(linePoints, 8);
-
-      // Interpolate between consecutive simplified points so the machine receives
-      // smaller linear moves without overloading the queue.
       const interpPoints = [];
       for (let k = 0; k < simplifiedPoints.length - 1; k++) {
         const a = simplifiedPoints[k];
@@ -469,6 +489,57 @@ function buildStrokeCommands(stroke) {
 
       const lastArduino = convertCenteredToArduino(interpPoints[interpPoints.length - 1]);
       commands.push({ x: lastArduino.x, y: lastArduino.y, z: PEN_UP_Z });
+    }
+  } else {
+    for (let i = 0; i < mirror; i++) {
+      for (let reflected of [false, true]) {
+        const linePoints = [];
+        for (let j = 0; j < stroke.segments.length; j++) {
+          const seg = stroke.segments[j];
+          const start = applySymmetryTransform(seg.lineStartX, seg.lineStartY, i, angleDeg, reflected);
+          linePoints.push(start);
+          if (j === stroke.segments.length - 1) {
+            const end = applySymmetryTransform(seg.lineEndX, seg.lineEndY, i, angleDeg, reflected);
+            linePoints.push(end);
+          }
+        }
+
+        if (linePoints.length === 0) continue;
+
+        const simplifiedPoints = simplifyLinePoints(linePoints, 8);
+
+        // Interpolate between consecutive simplified points so the machine receives
+        // smaller linear moves without overloading the queue.
+        const interpPoints = [];
+        for (let k = 0; k < simplifiedPoints.length - 1; k++) {
+          const a = simplifiedPoints[k];
+          const b = simplifiedPoints[k + 1];
+          const dx = b.x - a.x;
+          const dy = b.y - a.y;
+          const dist = Math.hypot(dx, dy);
+          interpPoints.push(a);
+          if (dist > MAX_STEP_MM) {
+            const steps = Math.ceil(dist / MAX_STEP_MM);
+            for (let s = 1; s < steps; s++) {
+              const t = s / steps;
+              interpPoints.push({ x: a.x + dx * t, y: a.y + dy * t });
+            }
+          }
+        }
+        interpPoints.push(simplifiedPoints[simplifiedPoints.length - 1]);
+
+        const firstArduino = convertCenteredToArduino(interpPoints[0]);
+        commands.push({ x: firstArduino.x, y: firstArduino.y, z: PEN_UP_Z });
+        commands.push({ x: firstArduino.x, y: firstArduino.y, z: PEN_DOWN_Z });
+
+        for (let k = 1; k < interpPoints.length; k++) {
+          const arduinoPoint = convertCenteredToArduino(interpPoints[k]);
+          commands.push({ x: arduinoPoint.x, y: arduinoPoint.y, z: PEN_DOWN_Z });
+        }
+
+        const lastArduino = convertCenteredToArduino(interpPoints[interpPoints.length - 1]);
+        commands.push({ x: lastArduino.x, y: lastArduino.y, z: PEN_UP_Z });
+      }
     }
   }
 
