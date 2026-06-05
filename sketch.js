@@ -33,10 +33,10 @@ const DISPLAY_HEIGHT = MACHINE_Y * MM_TO_PX_RATIO;
 
 // Swap pen position constants if the machine's up/down axes are reversed.
 const PEN_UP_Z = 0;
-const PEN_DOWN_Z = 4;
+const PEN_DOWN_Z = 20;
 
 // speed constant
-const speed = 15.0;
+const speed = 20.0;
 
 let freehandBuffer;
 let activeStroke = null;
@@ -192,8 +192,6 @@ function draw() {
 
 // Draw preview overlay from main draw loop so it isn't immediately erased.
 function drawPreviewOverlay(commands) {
-  // We're already inside a scaled/translated frame in `draw()`,
-  // so draw in logical p5 coordinates (centered) without re-scaling.
   push();
   noFill();
   stroke(255, 0, 0);
@@ -477,13 +475,13 @@ function send() {
 
   // Split into batches of up to 100 commands
   while (allCommands.length) {
-    batchSend.push(allCommands.splice(0, 100));
+    batchSend.push(allCommands.splice(0, 500));
   }
 
   // Always append a final pen-up command to ensure the pen finishes raised
-  const finalPenUp = { x: 100, y: 100, z: PEN_UP_Z };
-  batchSend[batchSend.length - 1].push(finalPenUp);
-  console.log(`>>> APPENDED FINAL PEN-UP to last batch. Z value: ${PEN_UP_Z}`);
+  //const finalPenUp = { x: 500, y: 500, z: PEN_UP_Z };
+  //batchSend[batchSend.length - 1].push(finalPenUp);
+  //console.log(`>>> APPENDED FINAL PEN-UP to last batch. Z value: ${PEN_UP_Z}`);
 
   console.log(`total batches: ${batchSend.length}`);
   let batchIndex = 0;
@@ -524,7 +522,7 @@ function send() {
 
     batchIndex++;
     // Wait 500ms between batches to allow the Arduino queue to drain
-    setTimeout(sendNextBatch, 500);
+    setTimeout(sendNextBatch, 5000);
   }
 
   sendNextBatch();
