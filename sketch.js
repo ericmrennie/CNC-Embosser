@@ -619,7 +619,7 @@ function send() {
 
     batchIndex++;
     // Wait 500ms between batches to allow the Arduino queue to drain
-    setTimeout(sendNextBatch, 5000);
+    setTimeout(sendNextBatch, 120000);
   }
   sendNextBatch();
 }
